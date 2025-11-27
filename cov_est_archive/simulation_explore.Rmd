@@ -1,0 +1,766 @@
+---
+title: "simulation_tot"
+output: html_document
+date: "2023-10-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(MASS)
+library(purrr)
+library(dplyr)
+library(glue)
+library(tidyverse)
+library(nlshrink)
+library(progressr)
+library(stargazer)
+library(plotly)
+library(ggthemes)
+library(EnvStats)
+```
+
+```{r general setup}
+p = 100
+n_min = 6
+n_max = 30
+r_min = 0
+r_max = 0.9
+sd_min = 0.1
+sd_max = 1
+
+get_err <- function(e, t){
+  err_e = sum((e-t)^2)
+  return(err_e)
+}
+```
+
+```{r diagonal variability}
+r = 0.5
+n = 18
+corr = matrix(0, ncol=p, nrow=p)
+for (i in 1:p){
+  for (j in 1:p){
+    corr[i,j]=r^abs(i-j)
+  }
+}
+
+sim_diag <- function(sd_){
+  
+  sd = diag(rlnorm(p, meanlog = 0, sdlog=sd_))
+  cov = sd %*% corr %*% sd
+    
+  sim_err <- function(iter){
+
+    err = data.frame(matrix(nrow=1,ncol=6))
+    colnames(err) = c('oas_v','oas_c', 'ss', 'rblw','lw','s')
+    
+    # Generate samples from N(0,cov)
+    sample = mvrnorm(n, rep(0,p), cov)
+    
+    # Estimate the covariance matrix
+    scov = (t(sample) %*% sample)/nrow(sample)
+    f1 = (sum(diag(scov))/p)*diag(p)
+    f2 = diag(diag(scov))
+    tr_s = sum(diag(scov))
+    tr_s2 = sum(diag(t(scov) %*% scov))
+    tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
+    
+    # Method 2&3: LW & RBLW
+    num = 0
+    for (i in 1:n){
+      fill = sum((matrix(sample[i,],ncol=1) %*% matrix(sample[i,],nrow=1) - scov)^2)
+      num = num + fill
+    }
+    den = (n^2)*(tr_s2-(tr_s^2)/p)
+    rou_lw = num/den
+    rou_lw = min(rou_lw,1)
+    scov_lw = (1-rou_lw)*scov+rou_lw*f1
+
+    rou_rblw = (((n-2)/n)*tr_s2+tr_s^2)/((n+2)*(tr_s2-(tr_s^2)/p))
+    rou_rblw = min(rou_rblw,1)
+    scov_rblw = (1-rou_rblw)*scov+rou_rblw*f1
+    
+    # Method 4: oas_c
+    phi = (tr_s2-(tr_s^2)/p)/(tr_s^2+(1-2/p)*tr_s2)
+    rou_oas_constant = min(1/((n+1-2/p)*phi),1)
+    scov_oas_constant = (1-rou_oas_constant)*scov+rou_oas_constant*f1
+
+    # Method 5: oas_v
+    phi1 = (tr_s2-tr_sdiag2)/(tr_s2+tr_s^2-2*tr_sdiag2)
+    rou_oas_variant = min(1/((n+1)*phi1),1)
+    scov_oas_variant = (1-rou_oas_variant)*scov+rou_oas_variant*f2
+    
+    # Method 8: Shafer(applied to covariance matrix)
+    v <- (1/(n*(n - 1))) * (crossprod(sample^2) - (1/n) * (crossprod(sample))^2)
+    diag(v) <- 0
+    d <- (scov - f2)^2
+    rou_ss <- sum(v)/sum(d)
+    rou_ss <- max(min(rou_ss, 1), 0)
+    scov_ss = (1-rou_ss)*scov+rou_ss*f2
+    
+    # Collect errors
+    err[1,'lw'] = get_err(scov_lw,cov)
+    err[1,'rblw'] = get_err(scov_rblw,cov)
+    err[1,'ss'] = get_err(scov_ss,cov)
+    err[1,'oas_c'] = get_err(scov_oas_constant,cov)
+    err[1,'oas_v'] = get_err(scov_oas_variant,cov)
+    err[1,'s']=sum((scov-cov)^2)
+    
+    return(err)
+  }
+  res = map_dfr(seq(1,1000), sim_err) %>% mutate(sd=sd_)
+}
+res_sample_size = map_dfr(seq(sd_min,sd_max,0.1),sim_diag,.progress=TRUE)
+saveRDS(res_sample_size, 'diag.rds')
+result = res_sample_size %>% group_by(sd) %>% summarise(across(everything(), mean)) %>% ungroup() %>% mutate(across(-c(s,sd), ~(.data$s-.)/.data$s))
+result = pivot_longer(result,cols=!sd,names_to='method',values_to ='PRIAL')
+pl = ggplot(result %>% filter(method != 's'), aes(x=sd,y=PRIAL,group=method,color=method))+geom_line()
+ggplotly(pl)
+ggsave('diag.jpg')
+```
+
+```{r nlshrink vs lshrink diag}
+r = 0.5
+n = 18
+corr = matrix(0, ncol=p, nrow=p)
+for (i in 1:p){
+  for (j in 1:p){
+    corr[i,j]=r^abs(i-j)
+  }
+}
+sim_diag <- function(sd_){
+  
+  sd = diag(rlnorm(p, meanlog = 0, sdlog=sd_))
+  cov = sd %*% corr %*% sd
+    
+  sim_err <- function(iter){
+
+    err = data.frame(matrix(nrow=1,ncol=3))
+    colnames(err) = c('lw','nl','s')
+    
+    # Generate samples from N(0,cov)
+    sample = mvrnorm(n, rep(0,p), cov)
+    
+    # Estimate the covariance matrix
+    scov = (t(sample) %*% sample)/nrow(sample)
+    f1 = (sum(diag(scov))/p)*diag(p)
+    f2 = diag(diag(scov))
+    tr_s = sum(diag(scov))
+    tr_s2 = sum(diag(t(scov) %*% scov))
+    tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
+    
+    # Method 2&3: LW & RBLW
+    num = 0
+    for (i in 1:n){
+      fill = sum((matrix(sample[i,],ncol=1) %*% matrix(sample[i,],nrow=1) - scov)^2)
+      num = num + fill
+    }
+    den = (n^2)*(tr_s2-(tr_s^2)/p)
+    rou_lw = num/den
+    rou_lw = min(rou_lw,1)
+    scov_lw = (1-rou_lw)*scov+rou_lw*f1
+    
+    # # Method 9: Nonlinear
+    tic()
+    scov_nl = nlshrink_cov(sample,k=1)
+    toc()
+    
+    # Collect errors
+    err[1,'lw'] = get_err(scov_lw,cov)
+    err[1, 'nl'] = get_err(scov_nl, cov)
+    err[1, 's'] = get_err(scov, cov)
+    
+    return(err)
+  }
+  res = map_dfr(seq(1,100), sim_err) %>% mutate(sd=sd_)
+}
+res_sample_size = map_dfr(seq(sd_min,sd_max,0.1),sim_diag,.progress=TRUE)
+saveRDS(res_sample_size, 'nlshrink+vs+lshrink+diag.rds')
+# we can do two-sample t-test to prove they are similar
+results_tab = res_sample_size %>% group_by(sd) %>% summarise(
+  t_stat = t.test(lw,nl)$statistic,
+  p_value = t.test(lw,nl)$p.value,
+  mean_diff = mean(lw)-mean(nl),
+  conf_low = t.test(lw,nl)$conf.int[1],
+  conf_high = t.test(lw,nl)$conf.int[2]
+) %>% mutate(
+  p_value=paste0(format(p_value, scientific = TRUE, digits = 3), 
+                     case_when(
+                       p_value < 0.001 ~ "***",
+                       p_value < 0.01  ~ "**",
+                       p_value < 0.05  ~ "*",
+                       TRUE            ~ ""
+                     )
+    )
+)
+stargazer(as.data.frame(results_tab), type='latex',summary=FALSE)
+```
+
+# not needed
+```{r high corr diag}
+r = 0.5
+n = 18
+corr = matrix(0, ncol=p, nrow=p)
+for (i in 1:p){
+  for (j in 1:p){
+    corr[i,j]=r^abs(i-j)
+  }
+}
+
+sim_diag <- function(sd_){
+  
+  sd = diag(rlnorm(p, meanlog = 0, sdlog=sd_))
+  cov = sd %*% corr %*% sd
+    
+  sim_err <- function(iter){
+
+    err = data.frame(matrix(nrow=1,ncol=7))
+    colnames(err) = c('oas_v','oas_c', 'ss', 'rblw','lw','nl','s')
+    
+    # Generate samples from N(0,cov)
+    sample = mvrnorm(n, rep(0,p), cov)
+    
+    # Estimate the covariance matrix
+    scov = (t(sample) %*% sample)/nrow(sample)
+    f1 = (sum(diag(scov))/p)*diag(p)
+    f2 = diag(diag(scov))
+    tr_s = sum(diag(scov))
+    tr_s2 = sum(diag(t(scov) %*% scov))
+    tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
+    
+    # Method 2&3: LW & RBLW
+    num = 0
+    for (i in 1:n){
+      fill = sum((matrix(sample[i,],ncol=1) %*% matrix(sample[i,],nrow=1) - scov)^2)
+      num = num + fill
+    }
+    den = (n^2)*(tr_s2-(tr_s^2)/p)
+    rou_lw = num/den
+    rou_lw = min(rou_lw,1)
+    scov_lw = (1-rou_lw)*scov+rou_lw*f1
+
+    rou_rblw = (((n-2)/n)*tr_s2+tr_s^2)/((n+2)*(tr_s2-(tr_s^2)/p))
+    rou_rblw = min(rou_rblw,1)
+    scov_rblw = (1-rou_rblw)*scov+rou_rblw*f1
+    
+    # Method 4: oas_c
+    phi = (tr_s2-(tr_s^2)/p)/(tr_s^2+(1-2/p)*tr_s2)
+    rou_oas_constant = min(1/((n+1-2/p)*phi),1)
+    scov_oas_constant = (1-rou_oas_constant)*scov+rou_oas_constant*f1
+
+    # Method 5: oas_v
+    phi1 = (tr_s2-tr_sdiag2)/(tr_s2+tr_s^2-2*tr_sdiag2)
+    rou_oas_variant = min(1/((n+1)*phi1),1)
+    scov_oas_variant = (1-rou_oas_variant)*scov+rou_oas_variant*f2
+    
+    # Method 8: Shafer(applied to covariance matrix)
+    v <- (1/(n*(n - 1))) * (crossprod(sample^2) - (1/n) * (crossprod(sample))^2)
+    diag(v) <- 0
+    d <- (scov - f2)^2
+    rou_ss <- sum(v)/sum(d)
+    rou_ss <- max(min(rou_ss, 1), 0)
+    scov_ss = (1-rou_ss)*scov+rou_ss*f2
+    
+    # Method 9: nonlinear shrinkage
+    scov_nl = nlshrink_cov(sample,k=1)
+    
+    # Collect errors
+    err[1,'lw'] = get_err(scov_lw,cov)
+    err[1,'rblw'] = get_err(scov_rblw,cov)
+    err[1,'ss'] = get_err(scov_ss,cov)
+    err[1,'oas_c'] = get_err(scov_oas_constant,cov)
+    err[1,'oas_v'] = get_err(scov_oas_variant,cov)
+    err[1,'nl'] = get_err(scov_nl,cov)
+    err[1,'s'] = get_err(scov, cov)
+    
+    print(iter)
+    return(err)
+  }
+  res = map_dfr(seq(1,1000), sim_err) %>% mutate(sd=sd_)
+}
+res_sample_size = map_dfr(seq(0.9,1,0.1),sim_diag,.progress=TRUE)
+saveRDS(res_sample_size, 'highcorr.rds')
+result = res_sample_size %>% group_by(sd) %>% summarise(across(everything(), mean)) %>% ungroup() %>% mutate(across(-c(s,sd), ~(.data$s-.)/.data$s))
+result = pivot_longer(result,cols=!sd,names_to='method',values_to ='PRIAL')
+pl = ggplot(result %>% filter(method != 's'), aes(x=sd,y=PRIAL,group=method,color=method))+geom_line()
+ggplotly(pl)
+# ggsave('highcorrdiag.jpg')
+```
+
+```{r diag variability for corr}
+set.seed(1234)
+r = 0.7
+n = 18
+corr = matrix(0, ncol=p, nrow=p)
+for (i in 1:p){
+  for (j in 1:p){
+    corr[i,j]=r^abs(i-j)
+  }
+}
+
+sim_diag <- function(sd_){
+  
+  sd_s = 1
+  # sd_b = 10
+  sd_b = sd_
+  # sd_b = 1 #0.25 & -0.5
+  sd = diag(c(rep(sd_s, p/2), rep(sd_b, p/2)))
+  # sd = diag(c(rep(sd_s, m_), rep(sd_b, 100-m_)))
+  # sd = diag(runif(p,1,sd_))
+  # sd = diag(rlnorm(p, meanlog = 0, sdlog=sd_))
+  # sd = diag(rchisq(p,sd_))
+  cov = sd %*% corr %*% sd
+    
+  sim_err <- function(iter){
+
+    err = data.frame(matrix(nrow=1,ncol=7))
+    colnames(err) = c('oas_v','oas_c', 'ss', 'rblw','lw','s','oracle_v')
+    
+    # Generate samples from N(0,cov)
+    sample = mvrnorm(n, rep(0,p), cov)
+    
+    # Estimate the covariance matrix
+    scov = (t(sample) %*% sample)/nrow(sample)
+    f1 = (sum(diag(scov))/p)*diag(p)
+    f2 = diag(diag(scov))
+    tr_s = sum(diag(scov))
+    tr_s2 = sum(diag(t(scov) %*% scov))
+    tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
+    
+    tr_t = sum(diag(cov))
+    tr_t2 = sum(diag(t(cov) %*% cov))
+    tr_tdiag2 = sum(diag(diag(diag(cov)) %*% diag(diag(cov))))
+    tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
+    
+    scorr = cov2cor(scov)
+    tr_s_cor = sum(diag(scorr))
+    tr_s2_cor = sum(diag(t(scorr) %*% scorr))
+    f1_cor = (sum(diag(scorr))/p)*diag(p)
+    sample_sc = sample %*% (diag(diag(f2)^(-1/2)))
+    
+    # Method 2&3: LW & RBLW
+    num = 0
+    for (i in 1:n){
+      fill = sum((matrix(sample_sc[i,],ncol=1) %*% matrix(sample_sc[i,],nrow=1) - scorr)^2)
+      num = num + fill
+    }
+    den = (n^2)*(tr_s2_cor-(tr_s_cor^2)/p)
+    rou_lw = num/den
+    rou_lw = min(rou_lw,1)
+    scorr_lw = (1-rou_lw)*scorr+rou_lw*f1_cor
+    scov_lw = (f2^(1/2)) %*% scorr_lw %*% (f2^(1/2))
+
+    rou_rblw = (((n-2)/n)*tr_s2_cor+tr_s_cor^2)/((n+2)*(tr_s2_cor-(tr_s_cor^2)/p))
+    rou_rblw = min(rou_rblw,1)
+    scorr_rblw = (1-rou_rblw)*scorr+rou_rblw*f1_cor
+    scov_rblw = (f2^(1/2)) %*% scorr_rblw %*% (f2^(1/2))
+    
+    # Method 4: oas_c
+    phi = (tr_s2_cor-(tr_s_cor^2)/p)/(tr_s_cor^2+(1-2/p)*tr_s2_cor)
+    rou_oas_constant = min(1/((n+1-2/p)*phi),1)
+    scorr_oas_constant = (1-rou_oas_constant)*scorr+rou_oas_constant*f1_cor
+    scov_oas_constant = (f2^(1/2)) %*% scorr_oas_constant %*% (f2^(1/2))
+
+    # Method 5: oas_v
+    phi1 = (tr_s2-tr_sdiag2)/(tr_s2+tr_s^2-2*tr_sdiag2)
+    rou_oas_variant = min(1/((n+1)*phi1),1)
+    scov_oas_variant = (1-rou_oas_variant)*scov+rou_oas_variant*f2
+    # phi1 = (tr_s2_cor-tr_sdiag2_cor)/(tr_s2_cor+tr_s_cor^2-2*tr_sdiag2_cor)
+    # rou_oas_variant = min(1/((n+1)*phi1),1)
+    # scorr_oas_variant = (1-rou_oas_variant)*scorr+rou_oas_variant*f1_cor
+    # scov_oas_variant = (f2^(1/2)) %*% scorr_oas_variant %*% (f2^(1/2))
+    rou_o_variant = ((1/n)*tr_t2-(2/n)*tr_tdiag2+(1/n)*tr_t^2)/(((n+1)/n)*tr_t2+(1/n)*tr_t^2-((n+2)/n)*tr_tdiag2)
+    scov_o_variant = (1-rou_o_variant)*scov+rou_o_variant*f2
+    
+    # Method 8: Shafer(applied to correlation matrix matrix)
+    v <- (1/(n*(n - 1))) * (crossprod(sample_sc^2) - (1/n) * (crossprod(sample_sc))^2)
+    diag(v) <- 0
+    d <- (scorr - diag(diag(scorr)))^2
+    rou_ss <- sum(v)/sum(d)
+    rou_ss <- max(min(rou_ss, 1), 0)
+    scorr_ss = (1-rou_ss)*scorr+rou_ss*f1_cor
+    scov_ss = (f2^(1/2)) %*% scorr_ss %*% (f2^(1/2))
+    
+    # Collect errors
+    err[1,'lw'] = get_err(scov_lw,cov)
+    err[1,'rblw'] = get_err(scov_rblw,cov)
+    err[1,'ss'] = get_err(scov_ss,cov)
+    err[1,'oas_c'] = get_err(scov_oas_constant,cov)
+    err[1,'oas_v'] = get_err(scov_oas_variant,cov)
+    err[1,'s']=sum((scov-cov)^2)
+    err[1,'oracle_v']=get_err(scov_o_variant, cov)
+        
+    return(err)
+  }
+  res = map_dfr(seq(1,1000), sim_err) %>% mutate(sd=sd_)
+  # res = map_dfr(seq(1,1000), sim_err) %>% mutate(m=m_)
+}
+res_sample_size = map_dfr(seq(1,10,1),sim_diag,.progress=TRUE)
+saveRDS(res_sample_size, 'diag_corr.rds')
+# result = res_sample_size %>% group_by(sd) %>% summarise(across(everything(), mean)) %>% ungroup() %>% mutate(across(-c(s,sd), ~(.data$s-.)/.data$s))
+# result = pivot_longer(result,cols=!sd,names_to='method',values_to ='PRIAL')
+# pl = ggplot(result %>% filter(method != 's'), aes(x=sd,y=PRIAL,group=method,color=method))+geom_line()
+# ggplotly(pl)
+# ggsave('diag_corr.jpg')
+result = res_sample_size %>% group_by(sd) %>% summarise(across(everything(), mean)) %>% ungroup() %>% mutate(across(-c(s,sd), ~(.data$s-.)/.data$s))
+result = pivot_longer(result,cols=!sd,names_to='method',values_to ='PRIAL')
+pl = ggplot(result %>% filter(method != 's'), aes(x=sd,y=PRIAL,group=method,color=method))+geom_line()
+ggplotly(pl)
+# ggsave('vary_m.png')
+```
+
+two questions now
+1. the distribution of large vs small diagonal entries -- dip at 90 1s and 10 10s
+2. how deviations away from the two level framework affect performance
+
+```{r evalue}
+set.seed(1234)
+r = 0.7
+n = 18
+p = 100
+corr = matrix(0, ncol=p, nrow=p)
+for (i in 1:p){
+  for (j in 1:p){
+    corr[i,j]=r^abs(i-j)
+  }
+}
+get_err <- function(e, t){
+  err_e = sum((e-t)^2)
+  return(err_e)
+}
+
+sim_diag <- function(a){
+  
+  # sd = diag(exp(rnormMix(100,mean1 = 0, sd1=0.3, mean2=a, sd2=0.3, p.mix=0.5)))
+  # sd = diag(c(rep(1,a), rep(100,100-a)))
+  mu = -a^2/2
+  sd = diag(rlnorm(100,mu,a))
+  cov = sd %*% corr %*% sd
+    
+  sim_err <- function(iter){
+
+    err = data.frame(matrix(nrow=1,ncol=7))
+    colnames(err) = c('oas_v','oas_c', 'ss', 'rblw','lw','s','oracle_v')
+    
+    # Generate samples from N(0,cov)
+    sample = mvrnorm(n, rep(0,p), cov)
+    
+    # Estimate the covariance matrix
+    scov = (t(sample) %*% sample)/nrow(sample)
+    f1 = (sum(diag(scov))/p)*diag(p)
+    f2 = diag(diag(scov))
+    tr_s = sum(diag(scov))
+    tr_s2 = sum(diag(t(scov) %*% scov))
+    tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
+    
+    tr_t = sum(diag(cov))
+    tr_t2 = sum(diag(t(cov) %*% cov))
+    tr_tdiag2 = sum(diag(diag(diag(cov)) %*% diag(diag(cov))))
+    tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
+    
+    scorr = cov2cor(scov)
+    tr_s_cor = sum(diag(scorr))
+    tr_s2_cor = sum(diag(t(scorr) %*% scorr))
+    f1_cor = (sum(diag(scorr))/p)*diag(p)
+    sample_sc = sample %*% (diag(diag(f2)^(-1/2)))
+    
+    # Method 2&3: LW & RBLW
+    num = 0
+    for (i in 1:n){
+      fill = sum((matrix(sample_sc[i,],ncol=1) %*% matrix(sample_sc[i,],nrow=1) - scorr)^2)
+      num = num + fill
+    }
+    den = (n^2)*(tr_s2_cor-(tr_s_cor^2)/p)
+    rou_lw = num/den
+    rou_lw = min(rou_lw,1)
+    scorr_lw = (1-rou_lw)*scorr+rou_lw*f1_cor
+    scov_lw = (f2^(1/2)) %*% scorr_lw %*% (f2^(1/2))
+
+    rou_rblw = (((n-2)/n)*tr_s2_cor+tr_s_cor^2)/((n+2)*(tr_s2_cor-(tr_s_cor^2)/p))
+    rou_rblw = min(rou_rblw,1)
+    scorr_rblw = (1-rou_rblw)*scorr+rou_rblw*f1_cor
+    scov_rblw = (f2^(1/2)) %*% scorr_rblw %*% (f2^(1/2))
+    
+    # Method 4: oas_c
+    phi = (tr_s2_cor-(tr_s_cor^2)/p)/(tr_s_cor^2+(1-2/p)*tr_s2_cor)
+    rou_oas_constant = min(1/((n+1-2/p)*phi),1)
+    scorr_oas_constant = (1-rou_oas_constant)*scorr+rou_oas_constant*f1_cor
+    scov_oas_constant = (f2^(1/2)) %*% scorr_oas_constant %*% (f2^(1/2))
+
+    # Method 5: oas_v
+    phi1 = (tr_s2-tr_sdiag2)/(tr_s2+tr_s^2-2*tr_sdiag2)
+    rou_oas_variant = min(1/((n+1)*phi1),1)
+    scov_oas_variant = (1-rou_oas_variant)*scov+rou_oas_variant*f2
+    # phi1 = (tr_s2_cor-tr_sdiag2_cor)/(tr_s2_cor+tr_s_cor^2-2*tr_sdiag2_cor)
+    # rou_oas_variant = min(1/((n+1)*phi1),1)
+    # scorr_oas_variant = (1-rou_oas_variant)*scorr+rou_oas_variant*f1_cor
+    # scov_oas_variant = (f2^(1/2)) %*% scorr_oas_variant %*% (f2^(1/2))
+    rou_o_variant = ((1/n)*tr_t2-(2/n)*tr_tdiag2+(1/n)*tr_t^2)/(((n+1)/n)*tr_t2+(1/n)*tr_t^2-((n+2)/n)*tr_tdiag2)
+    scov_o_variant = (1-rou_o_variant)*scov+rou_o_variant*f2
+    
+    # Method 8: Shafer(applied to correlation matrix matrix)
+    v <- (1/(n*(n - 1))) * (crossprod(sample_sc^2) - (1/n) * (crossprod(sample_sc))^2)
+    diag(v) <- 0
+    d <- (scorr - diag(diag(scorr)))^2
+    rou_ss <- sum(v)/sum(d)
+    rou_ss <- max(min(rou_ss, 1), 0)
+    scorr_ss = (1-rou_ss)*scorr+rou_ss*f1_cor
+    scov_ss = (f2^(1/2)) %*% scorr_ss %*% (f2^(1/2))
+    
+    # Collect errors
+    err[1,'lw'] = get_err(scov_lw,cov)
+    err[1,'rblw'] = get_err(scov_rblw,cov)
+    err[1,'ss'] = get_err(scov_ss,cov)
+    err[1,'oas_c'] = get_err(scov_oas_constant,cov)
+    err[1,'oas_v'] = get_err(scov_oas_variant,cov)
+    err[1,'s']=sum((scov-cov)^2)
+    err[1,'oracle_v']=get_err(scov_o_variant, cov)
+        
+    return(err)
+  }
+  res = map_dfr(seq(1,1000), sim_err) %>% mutate(a=a)
+}
+res_sample_size = map_dfr(seq(0.1,2,0.1),sim_diag,.progress=TRUE)
+result = res_sample_size %>% group_by(a) %>% summarise(across(everything(), ~mean(.))) %>% ungroup() %>% mutate(across(-c(s,a), ~(.data$s-.)/.data$s))
+result = pivot_longer(result,cols=!a,names_to='method',values_to ='PRIAL')
+pl = ggplot(result %>% filter(method != 's'), aes(x=a,y=PRIAL,group=method,color=method))+geom_line()
+ggplotly(pl)
+# ggsave('vary_m.png')
+```
+
+```{r check2}
+testdf = data.frame(matrix(nrow=100,ncol=4))
+colnames(testdf) = c('t','t2','td','a')
+for (a in 1:100){
+  sd = diag(c(rep(1,a), rep(100,100-a)))
+  cov = sd %*% corr %*% sd
+  
+  tr_t = sum(diag(cov))
+  tr_t2 = sum(diag(t(cov) %*% cov))
+  tr_tdiag2 = sum(diag(diag(diag(cov)) %*% diag(diag(cov))))
+  
+  testdf[a,'t'] = tr_t
+  testdf[a,'t2'] = tr_t2
+  testdf[a,'td'] = tr_tdiag2
+  testdf[a,'a'] = a
+}
+
+```
+
+```{r offdiag sparsity}
+n = 18
+sd_ = 0.5
+
+sim_diag <- function(r_){
+  
+  # corr = matrix(0, ncol=p, nrow=p)
+  # for (i in 1:p){
+  #   for (j in 1:p){
+  #     corr[i,j]=r^abs(i-j)
+  #   }
+  # }
+  # sd = diag(rlnorm(p, meanlog = 0, sdlog=sd_))
+  # cov = sd %*% corr %*% sd
+  corr = matrix(0, ncol=p, nrow=p)
+  for (i in 1:p){
+    for (j in 1:p){
+      corr[i,j]=r^abs(i-j)
+    }
+  }
+  
+  sd_s = 1
+  sd_b = 10
+  sd = diag(c(rep(sd_s, p/2), rep(sd_b, p/2)))
+  cov = sd %*% corr %*% sd
+    
+  sim_err <- function(iter){
+
+    err = data.frame(matrix(nrow=1,ncol=6))
+    colnames(err) = c('oas_v','oas_c', 'ss', 'rblw','lw','s')
+    
+    # Generate samples from N(0,cov)
+    sample = mvrnorm(n, rep(0,p), cov)
+    
+    # Estimate the covariance matrix
+    scov = (t(sample) %*% sample)/nrow(sample)
+    f1 = (sum(diag(scov))/p)*diag(p)
+    f2 = diag(diag(scov))
+    tr_s = sum(diag(scov))
+    tr_s2 = sum(diag(t(scov) %*% scov))
+    tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
+    
+    scorr = cov2cor(scov)
+    corr = cov2cor(cov)
+    tr_t2_cor = sum(diag(t(corr) %*% corr))
+    tr_t_cor = sum(diag(corr))
+    tr_s_cor = sum(diag(scorr))
+    tr_s2_cor = sum(diag(t(scorr) %*% scorr))
+    f1_cor = (sum(diag(scorr))/p)*diag(p)
+    sample_sc = sample %*% (diag(diag(f2)^(-1/2)))
+    
+    # Method 2&3: LW & RBLW
+    num = 0
+    for (i in 1:n){
+      fill = sum((matrix(sample_sc[i,],ncol=1) %*% matrix(sample_sc[i,],nrow=1) - scorr)^2)
+      num = num + fill
+    }
+    den = (n^2)*(tr_s2_cor-(tr_s_cor^2)/p)
+    rou_lw = num/den
+    rou_lw = min(rou_lw,1)
+    scorr_lw = (1-rou_lw)*scorr+rou_lw*f1_cor
+    scov_lw = (f2^(1/2)) %*% scorr_lw %*% (f2^(1/2))
+
+    rou_rblw = (((n-2)/n)*tr_s2_cor+tr_s_cor^2)/((n+2)*(tr_s2_cor-(tr_s_cor^2)/p))
+    rou_rblw = min(rou_rblw,1)
+    scorr_rblw = (1-rou_rblw)*scorr+rou_rblw*f1_cor
+    scov_rblw = (f2^(1/2)) %*% scorr_rblw %*% (f2^(1/2))
+    
+    # Method 4: oas_c
+    phi = (tr_s2_cor-(tr_s_cor^2)/p)/(tr_s_cor^2+(1-2/p)*tr_s2_cor)
+    rou_oas_constant = min(1/((n+1-2/p)*phi),1)
+    scorr_oas_constant = (1-rou_oas_constant)*scorr+rou_oas_constant*f1_cor
+    scov_oas_constant = (f2^(1/2)) %*% scorr_oas_constant %*% (f2^(1/2))
+
+    # Method 5: oas_v
+    phi1 = (tr_s2-tr_sdiag2)/(tr_s2+tr_s^2-2*tr_sdiag2)
+    rou_oas_variant = min(1/((n+1)*phi1),1)
+    scov_oas_variant = (1-rou_oas_variant)*scov+rou_oas_variant*f2
+    
+    # Method 8: Shafer(applied to correlation matrix matrix)
+    v <- (1/(n*(n - 1))) * (crossprod(sample_sc^2) - (1/n) * (crossprod(sample_sc))^2)
+    diag(v) <- 0
+    d <- (scorr - diag(diag(scorr)))^2
+    rou_ss <- sum(v)/sum(d)
+    rou_ss <- max(min(rou_ss, 1), 0)
+    scorr_ss = (1-rou_ss)*scorr+rou_ss*f1_cor
+    scov_ss = (f2^(1/2)) %*% scorr_ss %*% (f2^(1/2))
+    
+    # Collect errors
+    err[1,'lw'] = get_err(scov_lw,cov)
+    err[1,'rblw'] = get_err(scov_rblw,cov)
+    err[1,'ss'] = get_err(scov_ss,cov)
+    err[1,'oas_c'] = get_err(scov_oas_constant,cov)
+    err[1,'oas_v'] = get_err(scov_oas_variant,cov)
+    err[1,'s']=sum((scov-cov)^2)
+    
+    return(err)
+  }
+  res = map_dfr(seq(1,1000), sim_err) %>% mutate(r=r_)
+}
+res_sample_size = map_dfr(seq(r_min,r_max,0.1),sim_diag,.progress=TRUE)
+saveRDS(res_sample_size, 'r_corr.rds')
+result = res_sample_size %>% group_by(r) %>% summarise(across(everything(), mean)) %>% ungroup() %>% mutate(across(-c(s,r), ~(.data$s-.)/.data$s))
+result = pivot_longer(result,cols=!r,names_to='method',values_to ='PRIAL')
+pl = ggplot(result %>% filter(method != 's'), aes(x=r,y=PRIAL,group=method,color=method))+geom_line()
+ggplotly(pl)
+ggsave('r_corr.jpg')
+```
+
+```{r evec}
+set.seed(1234)
+r = 0
+n = 18
+p = 100
+
+get_err <- function(e, t){
+  err_e = sum((e-t)^2)
+  return(err_e)
+}
+sim_diag <- function(a){
+  
+  corr = T %*% diag(p)
+  cov = diag(p) %*% corr %*% diag(p)
+    
+  sim_err <- function(iter){
+
+    err = data.frame(matrix(nrow=1,ncol=7))
+    colnames(err) = c('oas_v','oas_c', 'ss', 'rblw','lw','s','oracle_v')
+    
+    # Generate samples from N(0,cov)
+    sample = mvrnorm(n, rep(0,p), cov)
+    
+    # Estimate the covariance matrix
+    scov = (t(sample) %*% sample)/nrow(sample)
+    f1 = (sum(diag(scov))/p)*diag(p)
+    f2 = diag(diag(scov))
+    tr_s = sum(diag(scov))
+    tr_s2 = sum(diag(t(scov) %*% scov))
+    tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
+    
+    tr_t = sum(diag(cov))
+    tr_t2 = sum(diag(t(cov) %*% cov))
+    tr_tdiag2 = sum(diag(diag(diag(cov)) %*% diag(diag(cov))))
+    tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
+    
+    scorr = cov2cor(scov)
+    tr_s_cor = sum(diag(scorr))
+    tr_s2_cor = sum(diag(t(scorr) %*% scorr))
+    f1_cor = (sum(diag(scorr))/p)*diag(p)
+    sample_sc = sample %*% (diag(diag(f2)^(-1/2)))
+    
+    # Method 2&3: LW & RBLW
+    num = 0
+    for (i in 1:n){
+      fill = sum((matrix(sample_sc[i,],ncol=1) %*% matrix(sample_sc[i,],nrow=1) - scorr)^2)
+      num = num + fill
+    }
+    den = (n^2)*(tr_s2_cor-(tr_s_cor^2)/p)
+    rou_lw = num/den
+    rou_lw = min(rou_lw,1)
+    scorr_lw = (1-rou_lw)*scorr+rou_lw*f1_cor
+    scov_lw = (f2^(1/2)) %*% scorr_lw %*% (f2^(1/2))
+
+    rou_rblw = (((n-2)/n)*tr_s2_cor+tr_s_cor^2)/((n+2)*(tr_s2_cor-(tr_s_cor^2)/p))
+    rou_rblw = min(rou_rblw,1)
+    scorr_rblw = (1-rou_rblw)*scorr+rou_rblw*f1_cor
+    scov_rblw = (f2^(1/2)) %*% scorr_rblw %*% (f2^(1/2))
+    
+    # Method 4: oas_c
+    phi = (tr_s2_cor-(tr_s_cor^2)/p)/(tr_s_cor^2+(1-2/p)*tr_s2_cor)
+    rou_oas_constant = min(1/((n+1-2/p)*phi),1)
+    scorr_oas_constant = (1-rou_oas_constant)*scorr+rou_oas_constant*f1_cor
+    scov_oas_constant = (f2^(1/2)) %*% scorr_oas_constant %*% (f2^(1/2))
+
+    # Method 5: oas_v
+    phi1 = (tr_s2-tr_sdiag2)/(tr_s2+tr_s^2-2*tr_sdiag2)
+    rou_oas_variant = min(1/((n+1)*phi1),1)
+    scov_oas_variant = (1-rou_oas_variant)*scov+rou_oas_variant*f2
+    # phi1 = (tr_s2_cor-tr_sdiag2_cor)/(tr_s2_cor+tr_s_cor^2-2*tr_sdiag2_cor)
+    # rou_oas_variant = min(1/((n+1)*phi1),1)
+    # scorr_oas_variant = (1-rou_oas_variant)*scorr+rou_oas_variant*f1_cor
+    # scov_oas_variant = (f2^(1/2)) %*% scorr_oas_variant %*% (f2^(1/2))
+    rou_o_variant = ((1/n)*tr_t2-(2/n)*tr_tdiag2+(1/n)*tr_t^2)/(((n+1)/n)*tr_t2+(1/n)*tr_t^2-((n+2)/n)*tr_tdiag2)
+    scov_o_variant = (1-rou_o_variant)*scov+rou_o_variant*f2
+    
+    # Method 8: Shafer(applied to correlation matrix matrix)
+    v <- (1/(n*(n - 1))) * (crossprod(sample_sc^2) - (1/n) * (crossprod(sample_sc))^2)
+    diag(v) <- 0
+    d <- (scorr - diag(diag(scorr)))^2
+    rou_ss <- sum(v)/sum(d)
+    rou_ss <- max(min(rou_ss, 1), 0)
+    scorr_ss = (1-rou_ss)*scorr+rou_ss*f1_cor
+    scov_ss = (f2^(1/2)) %*% scorr_ss %*% (f2^(1/2))
+    
+    # Collect errors
+    err[1,'lw'] = get_err(scov_lw,cov)
+    err[1,'rblw'] = get_err(scov_rblw,cov)
+    err[1,'ss'] = get_err(scov_ss,cov)
+    err[1,'oas_c'] = get_err(scov_oas_constant,cov)
+    err[1,'oas_v'] = get_err(scov_oas_variant,cov)
+    err[1,'s']=sum((scov-cov)^2)
+    err[1,'oracle_v']=get_err(scov_o_variant, cov)
+        
+    return(err)
+  }
+  res = map_dfr(seq(1,1000), sim_err) %>% mutate(a=a)
+}
+res_sample_size = map_dfr(seq(0.1,2,0.1),sim_diag,.progress=TRUE)
+result = res_sample_size %>% group_by(a) %>% summarise(across(everything(), mean)) %>% ungroup() %>% mutate(across(-c(s,a), ~(.data$s-.)/.data$s))
+result = pivot_longer(result,cols=!a,names_to='method',values_to ='PRIAL')
+pl = ggplot(result %>% filter(method != 's'), aes(x=a,y=PRIAL,group=method,color=method))+geom_line()
+ggplotly(pl)
+```
+
+
+
+
