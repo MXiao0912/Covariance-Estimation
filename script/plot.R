@@ -1,4 +1,4 @@
-plot_function = function(scen, destination="results/"){
+plot_function = function(scen, destination="../results/"){
   scen_r = str_replace(scen, "_corr", "")
   scen_r = str_replace(scen_r, "_inv", "")
   
@@ -89,7 +89,6 @@ plot_corr_single_function=function(scen){
   )
   return(p)
 }
-
 
 plot_inv_single_function=function(scen){
   scen_r = str_replace(scen, "_corr", "")
