@@ -1,122 +1,381 @@
-plot_function = function(scen, destination="../results/"){
-  scen_r = str_replace(scen, "_corr", "")
-  scen_r = str_replace(scen_r, "_inv", "")
+plot_function <- function(scen_r, destination="results/") {
   
-  res_sample_size = readRDS(paste0(destination,'coef_',scen, '.rds'))
-  res_sample_size[setdiff(c("sd","r","n"), scen_r)] = NULL
-  result = res_sample_size %>% group_by(.data[[scen_r]]) %>% summarise(across(everything(), ~mean(.)))
-  result = pivot_longer(result,cols=!all_of(scen_r), names_to='method',values_to ='rho') %>% mutate(ours = ifelse(method %in% c('OASD','OASB'),TRUE,FALSE))
-  p1 = ggplot(result %>% filter(!method %in% c('s')), aes(x=.data[[scen_r]],y=rho,group=method,color=method,shape=method, linetype=ours))+
-    geom_line(data = result %>% filter(!method %in% c('s','Oracle'))) + 
-    geom_line(data=result %>% filter(method %in% c('Oracle','Oracle_g')),color='black',show.legend=FALSE)+
-    geom_point(data = result %>% filter(!method %in% c('s','Oracle')), size=1) +
-    scale_linetype_manual(values = c("TRUE" = "solid", "FALSE" = "dashed"))+
-    scale_shape_manual(values = c("OD"=10,"OAS"=3,"LW"=14,"SS"=20,"OASD"=25, "OASB"=2),
-                       labels=c("LW"=TeX(r'($italic(LW)$)'), "OAS"=TeX(r'($italic(OAS)$)'), "OASD"=TeX(r'($italic(OASD)$)'), "OD"=TeX(r'($italic(OD)$)'), "SS"=TeX(r'($italic(SS)$)'), "OASB"=TeX(r'($italic(OASB)$)')))+
-    scale_color_manual(values = c("Oracle" = "black","OAS" = "blue","OD"="orange","LW"="brown","SS"="purple","OASD"="red", "OASB"="green"),
-                       labels=c("LW"=TeX(r'($italic(LW)$)'), "OAS"=TeX(r'($italic(OAS)$)'), "OASD"=TeX(r'($italic(OASD)$)'), "OD"=TeX(r'($italic(OD)$)'), "SS"=TeX(r'($italic(SS)$)'), "OASB"=TeX(r'($italic(OASB)$)')))+ 
-    xlab(scen) + ylab(TeX(r'($italic(Average)$ $\rho$)'))+ guides(linetype = "none") + 
-    theme(
-    text = element_text(size = 12),              # Global text size
-    axis.title = element_text(size = 12,face = "italic"),         # Axis titles
-    axis.text = element_text(size = 12),          # Axis text
-    plot.title = element_text(size = 12),         # Plot title
-    legend.title = element_text(size = 10, face="italic"),       # Legend title
-    legend.text = element_text(size = 10),
-    legend.position = "bottom", 
-    legend.box = "horizontal", 
-    legend.direction = "horizontal"
-  )
-  guide_plot <- cowplot::get_plot_component(p1, 'guide-box-bottom', return_all = TRUE)
-  p1 = p1 + theme(legend.position = 'none')
-  res_sample_size = readRDS(paste0(destination,scen,'.rds'))
-  res_sample_size[setdiff(c("sd","r","n"), scen_r)] = NULL
-  result = res_sample_size %>% group_by(.data[[scen_r]]) %>% summarise(across(everything(), ~mean(.))) %>% ungroup() %>% mutate(across(!all_of(c("s",scen_r)), ~(.data$s-.)/.data$s)*100)
-  result = pivot_longer(result,cols=!all_of(scen_r),names_to='method',values_to ='PRIAL') %>% mutate(ours = ifelse(method %in% c('OASD','OASB'),TRUE,FALSE))
-  p2 = ggplot(result %>% filter(!method %in% c('s')), aes(x=.data[[scen_r]],y=PRIAL,group=method,color=method, shape=method, linetype=ours))+
-    geom_line(data = result %>% filter(!method %in% c('s','Oracle'))) + 
-    geom_line(data=result %>% filter(method %in% c('Oracle','Oracle_g')),color='black',show.legend=FALSE)+
-    geom_point(data = result %>% filter(!method %in% c('s','Oracle')), size=1)+
-    scale_linetype_manual(values = c("TRUE" = "solid", "FALSE" = "dashed"))+
-    scale_shape_manual(values = c("OD"=10,"OAS"=3,"LW"=14,"SS"=20,"OASD"=25, "OASB"=2),
-                       labels=c("LW"=TeX(r'($italic(LW)$)'), "OAS"=TeX(r'($italic(OAS)$)'), "OASD"=TeX(r'($italic(OASD)$)'), "OD"=TeX(r'($italic(OD)$)'), "SS"=TeX(r'($italic(SS)$)'), "OASB"=TeX(r'($italic(OASB)$)')))+
-    scale_color_manual(values = c("Oracle" = "black","OAS" = "blue","OD"="orange","LW"="brown","SS"="purple","OASD"="red", "OASB"="green"),
-                       labels=c("LW"=TeX(r'($italic(LW)$)'), "OAS"=TeX(r'($italic(OAS)$)'), "OASD"=TeX(r'($italic(OASD)$)'), "OD"=TeX(r'($italic(OD)$)'), "SS"=TeX(r'($italic(SS)$)'), "OASB"=TeX(r'($italic(OASB)$)')))+ 
-    xlab(scen) + ylab(TeX(r'($italic(PRIAL)$)')) + guides(linetype = "none") + 
-    theme(
-    text = element_text(size = 12),              # Global text size
-    axis.title = element_text(size = 12,face = "italic"),         # Axis titles
-    axis.text = element_text(size = 12),          # Axis text
-    plot.title = element_text(size = 12),         # Plot title
-    legend.title = element_text(size = 12),       # Legend title
-    legend.text = element_text(size = 12),         # Legend text
-    legend.position = "none"
+  # ------------------------------------------------------------
+  # CONSTANTS: Define aesthetics here (no overrides later)
+  # ------------------------------------------------------------
+  
+  shape_vals <- c(
+    OD=NA, OAS=3, LW=14, SS=20, OASD=25, OASB=2,OB=NA
   )
   
-  combined_p = (p2 | p1)/guide_plot + 
-    plot_layout(heights = c(1, 0.1))
-  combined_p
-  ggsave(paste0(destination,scen,'_mse+coef.jpg'), width = 6, height = 4)
+  color_vals <- c(
+    OD="black",
+    OB="black",
+    OAS="blue",
+    LW="brown",
+    SS="orange",
+    OASD="red",
+    OASB="green"
+  )
+  
+  linetype_vals <- c(
+    OD ="dotted",
+    OB ="dotdash",
+    "TRUE"="solid",      # ours == TRUE  (OASD, OASB)
+    "FALSE"="dashed"     # all other estimators
+  )
+  
+  tex_labs <- c(
+    LW=TeX(r'($italic(LW)$)'),
+    OAS=TeX(r'($italic(OAS)$)'),
+    OASD=TeX(r'($italic(OASD)$)'),
+    SS=TeX(r'($italic(SS)$)'),
+    OASB=TeX(r'($italic(OASB)$)')
+  )
+  
+  keep_cols = c("OAS","LW","SS","OASD","OASB")
+  
+  base_theme <- theme(
+    text = element_text(size=12),
+    axis.title = element_text(size=12, face="italic"),
+    axis.text = element_text(size=12),
+    legend.title = element_text(size=10, face="italic"),
+    legend.text = element_text(size=10),
+    legend.position = "bottom",
+    legend.box = "horizontal"
+  )
+  
+  # ------------------------------------------------------------
+  # Helper for processing data (shared by rho/PRIAL)
+  # ------------------------------------------------------------
+  
+  process_data <- function(df) {
+    df[setdiff(c("sd","r","n"), scen_r)] <- NULL
+    df %>%
+      group_by(.data[[scen_r]]) %>%
+      summarise(across(everything(), mean)) %>%
+      ungroup()
+  }
+  
+  # ------------------------------------------------------------
+  # Generic plotting helper
+  # ------------------------------------------------------------
+  
+  make_plot <- function(result, scen_r, yvar, ylab_tex) {
+    
+    result_long <- result %>%
+      pivot_longer(!all_of(scen_r), names_to="method", values_to=yvar) %>%
+      mutate(
+        ours = method %in% c("OASD", "OASB"),
+        linetype_key = ifelse(method %in% c("OD","OB"),
+                              method,  # Oracle types handled explicitly
+                              as.character(ours))
+      )
+    
+    ggplot(result_long %>% filter(method != "s"),
+           aes(x=.data[[scen_r]],
+               y=.data[[yvar]],
+               group=method,
+               shape=method,
+               color=method,
+               linetype=linetype_key)) +
+      
+      geom_line(size=0.5) +
+      geom_point(size=0.5) +
+      
+      scale_shape_manual(values=shape_vals,  breaks = keep_cols, labels=tex_labs) +
+      scale_color_manual(values=color_vals,  breaks = keep_cols,  labels=tex_labs) +
+      scale_linetype_manual(values=linetype_vals,  breaks = keep_cols) +
+      
+      xlab(scen_r) +
+      ylab(TeX(ylab_tex)) +
+      guides(linetype="none") +
+      base_theme
+  }
+  
+  # ------------------------------------------------------------
+  # Panel 1: Average correlation (rho)
+  # ------------------------------------------------------------
+  df1 <- readRDS(paste0(destination, "coef_", scen_r, ".rds"))
+  res1 <- process_data(df1)
+  p1   <- make_plot(res1, scen_r, "rho", r'($italic(Average)$ $\rho$)')
+  
+  guide_plot <- cowplot::get_plot_component(p1, 'guide-box-bottom', return_all=TRUE)
+  p1 <- p1 + theme(legend.position="none")
+  
+  # ------------------------------------------------------------
+  # Panel 2: PRIAL
+  # ------------------------------------------------------------
+  df2 <- readRDS(paste0(destination, scen_r, ".rds"))
+  res2 <- process_data(df2) %>%
+    mutate(across(!all_of(c("s", scen_r)), ~ (s - .x)/s * 100))
+  
+  p2 <- make_plot(res2, scen_r, "PRIAL", r'($italic(PRIAL)$)') +
+    theme(legend.position="none")
+  
+  # ------------------------------------------------------------
+  # Combine panels
+  # ------------------------------------------------------------
+  combined_p <- (p2 | p1) / guide_plot +
+    plot_layout(heights=c(1, 0.1))
+  
+  print(combined_p)
+  
+  ggsave(
+    paste0(destination, scen_r, "_mse+coef.jpg"),
+    width=6, height=4
+  )
 }
 
-plot_corr_single_function=function(scen){
-  scen_r = str_replace(scen, "_corr", "")
-  scen_r = str_replace(scen_r, "_inv", "")
+
+
+plot_corr_single_function <- function(scen, destination="results/") {
   
-  res_sample_size = readRDS(paste0("results/",scen,'.rds'))
-  res_sample_size[setdiff(c("sd","r","n"), scen_r)] = NULL
-  result = res_sample_size %>% group_by(.data[[scen_r]]) %>% summarise(across(everything(), ~mean(.))) %>% ungroup() %>% mutate(across(!all_of(c("s",scen_r)), ~(.data$s-.)/.data$s)*100)
-  result = pivot_longer(result,cols=!all_of(scen_r),names_to='method',values_to ='PRIAL')%>% mutate(ours = ifelse(method %in% c('OASD'),TRUE,FALSE))
-  p = ggplot(result %>% filter(!method %in% c('s','OD')), aes(x=.data[[scen_r]],y=PRIAL,group=method,color=method,shape=method,linetype=ours))+
-    geom_line(data = result %>% filter(!method %in% c('s','Oracle','OD'))) + 
-    geom_line(data=result %>% filter(method %in% c('Oracle','Oracle_g')),color='black',show.legend=FALSE)+
-    geom_point(data = result %>% filter(!method %in% c('s','Oracle','OD')), size=1)+
-    scale_linetype_manual(values = c("TRUE" = "solid", "FALSE" = "dashed"))+
-    scale_shape_manual(values = c("OD"=10,"OAS"=3,"LW"=14,"SS"=20,"OASD"=25, "OASB"=2),
-                       labels=c("LW"=TeX(r'($italic(LW)_{italic(corr)}$)'), "OAS"=TeX(r'($italic(OAS)_{italic(corr)}$)'), "OASD"=TeX(r'($italic(OASD)$)'), "OD"=TeX(r'($italic(OD)$)'), "SS"=TeX(r'($italic(SS)$)'), "OASB"=TeX(r'($italic(OASB)$)')))+
-    scale_color_manual(values = c("Oracle" = "black","OAS" = "blue","OD"="orange","LW"="brown","SS"="purple","OASD"="red", "OASB"="green"),
-                       labels=c("LW"=TeX(r'($italic(LW)_{italic(corr)}$)'), "OAS"=TeX(r'($italic(OAS)_{italic(corr)}$)'), "OASD"=TeX(r'($italic(OASD)$)'), "OD"=TeX(r'($italic(OD)$)'), "SS"=TeX(r'($italic(SS)$)'), "OASB"=TeX(r'($italic(OASB)$)')))+ 
-    xlab(scen_r) + 
-    ylab(TeX(r'($italic(PRIAL)$)')) + guides(linetype = "none") + 
-    theme(
-    text = element_text(size = 12),              # Global text size
-    axis.title = element_text(size = 12,face = "italic"),         # Axis titles
-    axis.text = element_text(size = 12),          # Axis text
-    plot.title = element_text(size = 12),         # Plot title
-    legend.title = element_text(size = 12, face='italic'),       # Legend title
-    legend.text = element_text(size = 12, face='italic'),         # Legend text
-    legend.position = "bottom"
+  # ------------------------------------------------------------
+  # Extract scenario name (remove _corr or _inv)
+  # ------------------------------------------------------------
+  scen_r <- scen %>%
+    str_replace("_corr", "") %>%
+    str_replace("_inv", "")
+  
+  # ------------------------------------------------------------
+  # EXACT SAME AESTHETICS AS MAIN FUNCTION
+  # ------------------------------------------------------------
+  
+  shape_vals <- c(
+    OD=NA, OAS=3, LW=14, SS=20, OASD=25, OASB=2, OB=NA
   )
+  
+  color_vals <- c(
+    OD="black",
+    OB="black",
+    OAS="blue",
+    LW="brown",
+    SS="orange",
+    OASD="red",
+    OASB="green"
+  )
+  
+  linetype_vals <- c(
+    OD ="dotted",
+    OB ="dotdash",
+    "TRUE"  = "solid",
+    "FALSE" = "dashed"
+  )
+  
+  tex_labs <- c(
+    LW  = TeX(r'($italic(LW)$)'),
+    OAS = TeX(r'($italic(OAS)$)'),
+    OASD = TeX(r'($italic(OASD)$)'),
+    SS  = TeX(r'($italic(SS)$)'),
+    OASB = TeX(r'($italic(OASB)$)')
+  )
+  
+  keep_cols <- names(tex_labs)  # only these appear in legend
+  
+  base_theme <- theme(
+    text = element_text(size=12),
+    axis.title = element_text(size=12, face="italic"),
+    axis.text = element_text(size=12),
+    legend.title = element_text(size=10, face="italic"),
+    legend.text = element_text(size=10),
+    legend.position = "bottom",
+    legend.box = "horizontal"
+  )
+  
+  # ------------------------------------------------------------
+  # PROCESS DATA (same logic as main function)
+  # ------------------------------------------------------------
+  
+  df <- readRDS(paste0(destination, "/", scen, ".rds"))
+  df[setdiff(c("sd","r","n"), scen_r)] <- NULL
+  
+  result <- df %>%
+    group_by(.data[[scen_r]]) %>%
+    summarise(across(everything(), mean)) %>%
+    ungroup() %>%
+    mutate(across(
+      !all_of(c("s", scen_r)),
+      ~ (s - .x) / s * 100
+    ))
+  
+  # ------------------------------------------------------------
+  # Prepare long format & linetype mapping
+  # ------------------------------------------------------------
+  
+  result_long <- result %>%
+    pivot_longer(
+      !all_of(scen_r),
+      names_to = "method",
+      values_to = "PRIAL"
+    ) %>%
+    mutate(
+      ours = method %in% c("OASD", "OASB"),
+      linetype_key = ifelse(method %in% c("OD","OB"),
+                            method,
+                            as.character(ours))
+    )
+  
+  # ------------------------------------------------------------
+  # FINAL PLOT (exactly same structure as main function)
+  # ------------------------------------------------------------
+  
+  p <- ggplot(
+    result_long %>% filter(method != "s"),
+    aes(x = .data[[scen_r]],
+        y = PRIAL,
+        group = method,
+        shape = method,
+        color = method,
+        linetype = linetype_key)
+  ) +
+    geom_line(size=0.5) +
+    geom_point(size=0.5) +
+    
+    scale_shape_manual(
+      values = shape_vals,
+      breaks = keep_cols,
+      labels = tex_labs
+    ) +
+    scale_color_manual(
+      values = color_vals,
+      breaks = keep_cols,
+      labels = tex_labs
+    ) +
+    scale_linetype_manual(
+      values = linetype_vals,
+      breaks = c("TRUE","FALSE")   # OD/OB excluded
+    ) +
+    
+    xlab(scen_r) +
+    ylab(TeX(r'($italic(PRIAL)$)')) +
+    guides(linetype="none") +
+    base_theme
+  
   return(p)
 }
 
-plot_inv_single_function=function(scen){
-  scen_r = str_replace(scen, "_corr", "")
-  scen_r = str_replace(scen_r, "_inv", "")
+plot_inv_single_function <- function(scen, destination="results/") {
   
-  res_sample_size = readRDS(paste0("results/",scen,'.rds'))
-  res_sample_size[setdiff(c("sd","r","n"), scen_r)] = NULL
-  result = res_sample_size %>% group_by(.data[[scen_r]]) %>% summarise(across(everything(), ~mean(.))) %>% ungroup() %>% mutate(across(!all_of(c("s",scen_r,"MP")), ~(.data$MP-.)/.data$MP)*100)
-  result = pivot_longer(result,cols=!all_of(scen_r),names_to='method',values_to ='MSE') %>% mutate(ours = ifelse(method %in% c('OASD'),TRUE,FALSE))
-  p = ggplot(result %>% filter(!method %in% c('s', 'MP')), aes(x=.data[[scen_r]],y=MSE,group=method,color=method,shape=method, linetype=ours))+
-    geom_line(data = result %>% filter(!method %in% c('s','RBLW','OD','Oracle','MP'))) + 
-    geom_line(data=result %>% filter(method %in% c('Oracle','Oracle_g')),color='black',show.legend=FALSE)+
-    geom_point(data = result %>% filter(!method %in% c('s','RBLW','OD','Oracle','MP')), size=1) +
-    scale_linetype_manual(values = c("TRUE" = "solid", "FALSE" = "dashed"))+
-    scale_shape_manual(values = c("OD"=10,"OAS"=3,"LW"=14,"SS"=20,"OASD"=25, "OASB"=2),
-                       labels=c("LW"=TeX(r'($italic(LW)$)'), "OAS"=TeX(r'($italic(OAS)$)'), "OASD"=TeX(r'($italic(OASD)$)'), "OD"=TeX(r'($italic(OD)$)'), "SS"=TeX(r'($italic(SS)$)'), "OASB"=TeX(r'($italic(OASB)$)')))+
-    scale_color_manual(values = c("Oracle" = "black","OAS" = "blue","OD"="orange","LW"="brown","SS"="purple","OASD"="red", "OASB"="green"),
-                       labels=c("LW"=TeX(r'($italic(LW)$)'), "OAS"=TeX(r'($italic(OAS)$)'), "OASD"=TeX(r'($italic(OASD)$)'), "OD"=TeX(r'($italic(OD)$)'), "SS"=TeX(r'($italic(SS)$)'), "OASB"=TeX(r'($italic(OASB)$)')))+ 
-    xlab(scen_r) + ylab(TeX(r'($italic(PRIAL)_{italic(INV)}$)')) + guides(linetype = "none") + 
-    theme(
-    text = element_text(size = 12),              # Global text size
-    axis.title = element_text(size = 12,face = "italic"),         # Axis titles
-    axis.text = element_text(size = 12),          # Axis text
-    plot.title = element_text(size = 12),         # Plot title
-    legend.title = element_text(size = 12, face='italic'),       # Legend title
-    legend.text = element_text(size = 12, face='italic'),         # Legend text
-    legend.position = "bottom"
+  # ------------------------------------------------------------
+  # Extract scenario name (strip _corr or _inv)
+  # ------------------------------------------------------------
+  scen_r <- scen %>%
+    str_replace("_corr", "") %>%
+    str_replace("_inv", "")
+  
+  # ------------------------------------------------------------
+  # MATCH EXACTLY THE MAIN FUNCTION'S AESTHETICS
+  # ------------------------------------------------------------
+  
+  shape_vals <- c(
+    OD=NA, OAS=3, LW=14, SS=20, OASD=25, OASB=2, OB=NA
   )
+  
+  color_vals <- c(
+    OD="black",
+    OB="black",
+    OAS="blue",
+    LW="brown",
+    SS="orange",
+    OASD="red",
+    OASB="green"
+  )
+  
+  linetype_vals <- c(
+    OD ="dotted",
+    OB ="dotdash",
+    "TRUE"  = "solid",   # OASD, OASB
+    "FALSE" = "dashed"   # OAS, LW, SS
+  )
+  
+  tex_labs <- c(
+    LW  = TeX(r'($italic(LW)$)'),
+    OAS = TeX(r'($italic(OAS)$)'),
+    OASD= TeX(r'($italic(OASD)$)'),
+    SS  = TeX(r'($italic(SS)$)'),
+    OASB= TeX(r'($italic(OASB)$)')
+  )
+  
+  keep_cols <- names(tex_labs)   # OD, OB excluded
+  
+  base_theme <- theme(
+    text = element_text(size=12),
+    axis.title = element_text(size=12, face="italic"),
+    axis.text = element_text(size=12),
+    legend.title = element_text(size=10, face="italic"),
+    legend.text = element_text(size=10),
+    legend.position = "bottom",
+    legend.box = "horizontal"
+  )
+  
+  # ------------------------------------------------------------
+  # Load and process data
+  # ------------------------------------------------------------
+  
+  df <- readRDS(paste0(destination, "/", scen, ".rds"))
+  df[setdiff(c("sd","r","n"), scen_r)] <- NULL
+  
+  result <- df %>%
+    group_by(.data[[scen_r]]) %>%
+    summarise(across(everything(), mean)) %>%
+    ungroup() %>%
+    mutate(across(
+      !all_of(c(scen_r, "MP")),
+      ~ (MP - .x) / MP * 100
+    ))
+  
+  # ------------------------------------------------------------
+  # Long format + linetype mapping
+  # ------------------------------------------------------------
+  
+  result_long <- result %>%
+    pivot_longer(
+      !all_of(scen_r),
+      names_to = "method",
+      values_to = "MSE"
+    ) %>%
+    mutate(
+      ours = method %in% c("OASD", "OASB"),
+      linetype_key = ifelse(
+        method %in% c("OD","OB"),
+        method, 
+        as.character(ours)
+      )
+    )
+  
+  # ------------------------------------------------------------
+  # Final plot (exact style of main function)
+  # ------------------------------------------------------------
+  
+  p <- ggplot(
+    result_long %>% filter(!method %in% c("s","MP")),
+    aes(
+      x = .data[[scen_r]],
+      y = MSE,
+      group = method,
+      shape = method,
+      color = method,
+      linetype = linetype_key
+    )
+  ) +
+    geom_line(size=0.5) +
+    geom_point(size=0.5) +
+    
+    scale_shape_manual(values=shape_vals,
+                       breaks=keep_cols,
+                       labels=tex_labs) +
+    scale_color_manual(values=color_vals,
+                       breaks=keep_cols,
+                       labels=tex_labs) +
+    scale_linetype_manual(values=linetype_vals,
+                          breaks=c("TRUE","FALSE")) +
+    
+    xlab(scen_r) +
+    ylab(TeX(r'($italic(PRIAL)_{italic(INV)}$)')) +
+    guides(linetype = "none") +
+    base_theme
+  
   return(p)
 }
 
