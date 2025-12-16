@@ -28,35 +28,17 @@ sim_full <- function(sd_, r_, n_, iter, corr_ind=FALSE, inv_=FALSE, dist="normal
     
     # Estimate the covariance matrix
     
-    scov = cov(sample)
+    scov = (t(sample) %*% sample)/nrow(sample)
+
+    # LW
+    lw_res = lw(sample, corr_ind)
+    scov_lw = lw_res$covest
+    rou_lw = lw_res$coef
     
-    if (corr_ind==FALSE){
-      # LW
-      lw_res = lw(sample)
-      scov_lw = lw_res$covest
-      rou_lw = lw_res$coef
-      
-      # OAS
-      oas_res = oas(sample)
-      scov_oas = oas_res$covest
-      rou_oas = oas_res$coef  
-      
-    }else{
-      
-      f2 = diag(diag(cov(sample)))
-      sample_sc = sample %*% (diag(diag(f2)^(-1/2)))
-      
-      # LW
-      lw_res = lw(sample_sc)
-      scov_lw = (f2^(1/2)) %*% lw_res$covest %*% (f2^(1/2))
-      rou_lw = lw_res$coef
-      
-      # OAS
-      oas_res = oas(sample_sc)
-      scov_oas = (f2^(1/2)) %*% oas_res$covest %*% (f2^(1/2))
-      rou_oas = oas_res$coef  
-      
-    }
+    # OAS
+    oas_res = oas(sample, corr_ind)
+    scov_oas = oas_res$covest
+    rou_oas = oas_res$coef  
   
     
     # OASD (designed for diagonal target,so don't apply it to corr=TRUE)
