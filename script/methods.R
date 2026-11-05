@@ -1,45 +1,80 @@
-lw <- function(sample){
+lw <- function(sample, corr_ind){
   n_ = nrow(sample)
   p = ncol(sample)
-  scov = cov(sample)
+  scov = (t(sample) %*% sample)/nrow(sample)
   f1 = (sum(diag(scov))/p)*diag(p)
   f2 = diag(diag(scov))
   tr_s = sum(diag(scov))
   tr_s2 = sum(diag(t(scov) %*% scov))
   tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
   
+  scorr = cov2cor(scov)
+  f1_cor = (sum(diag(scorr))/p)*diag(p)
+  tr_s_cor = sum(diag(scorr))
+  tr_s2_cor = sum(diag(t(scorr) %*% scorr))
+  
+  sample_sc = sample %*% (diag(diag(f2)^(-1/2)))
+  
   num = 0
-  for (i in 1:n_){
-    fill = sum((matrix(sample[i,],ncol=1) %*% matrix(sample[i,],nrow=1) - scov)^2)
-    num = num + fill
+  if (!corr_ind){
+    for (i in 1:n_){
+      fill = sum((matrix(sample[i,],ncol=1) %*% matrix(sample[i,],nrow=1) - scov)^2)
+      num = num + fill
+    }
+    den = (n_^2)*(tr_s2-(tr_s^2)/p)
+  }else{
+    for (i in 1:n_){
+      fill = sum((matrix(sample_sc[i,],ncol=1) %*% matrix(sample_sc[i,],nrow=1) - scorr)^2)
+      num = num + fill
+    }
+    den = (n_^2)*(tr_s2_cor-(tr_s_cor^2)/p)
   }
-  den = (n_^2)*(tr_s2-(tr_s^2)/p)
   rou_lw = num/den
   rou_lw = min(rou_lw,1)
   
-  return(list(coef=rou_lw, covest=(1-rou_lw)*scov+rou_lw*f1))
+  if (corr_ind){
+    scorr_lw = (1-rou_lw)*scorr+rou_lw*f1_cor
+    scov_lw = (f2^(1/2)) %*% scorr_lw %*% (f2^(1/2))
+  }else{
+    scov_lw = (1-rou_lw)*scov+rou_lw*f1
+  }
+  
+  return(list(coef=rou_lw, covest=scov_lw))
 }
 
-oas <- function(sample){
+oas <- function(sample, corr_ind){
   n_ = nrow(sample)
   p = ncol(sample)
-  scov = cov(sample)
+  scov = (t(sample) %*% sample)/nrow(sample)
   f1 = (sum(diag(scov))/p)*diag(p)
   f2 = diag(diag(scov))
   tr_s = sum(diag(scov))
   tr_s2 = sum(diag(t(scov) %*% scov))
   tr_sdiag2 = sum(diag(diag(diag(scov)) %*% diag(diag(scov))))
   
-  phi = (tr_s2-(tr_s^2)/p)/(tr_s^2+(1-2/p)*tr_s2)
-  rou_oas_constant = min(1/((n_+1-2/p)*phi),1)
+  scorr = cov2cor(scov)
+  f1_cor = (sum(diag(scorr))/p)*diag(p)
+  tr_s_cor = sum(diag(scorr))
+  tr_s2_cor = sum(diag(t(scorr) %*% scorr))
   
-  return(list(coef=rou_oas_constant, covest=(1-rou_oas_constant)*scov+rou_oas_constant*f1))
+  if (corr_ind==FALSE){
+    phi = (tr_s2-(tr_s^2)/p)/(tr_s^2+(1-2/p)*tr_s2)
+    rou_oas_constant = min(1/((n_+1-2/p)*phi),1)
+    scov_oas_constant = (1-rou_oas_constant)*scov+rou_oas_constant*f1
+  }else{
+    phi = (tr_s2_cor-(tr_s_cor^2)/p)/(tr_s_cor^2+(1-2/p)*tr_s2_cor)
+    rou_oas_constant = min(1/((n_+1-2/p)*phi),1)
+    scorr_oas_constant = (1-rou_oas_constant)*scorr+rou_oas_constant*f1_cor
+    scov_oas_constant = (f2^(1/2)) %*% scorr_oas_constant %*% (f2^(1/2))
+  }
+  
+  return(list(coef=rou_oas_constant, covest=scov_oas_constant))
 }
 
 oasd <- function(sample){
   n_ = nrow(sample)
   p = ncol(sample)
-  scov = cov(sample)
+  scov = (t(sample) %*% sample)/nrow(sample)
   f1 = (sum(diag(scov))/p)*diag(p)
   f2 = diag(diag(scov))
   tr_s = sum(diag(scov))
@@ -55,7 +90,7 @@ oasd <- function(sample){
 oasb <- function(sample){
   n_ = nrow(sample)
   p = ncol(sample)
-  scov = cov(sample)
+  scov = (t(sample) %*% sample)/nrow(sample)
   f1 = (sum(diag(scov))/p)*diag(p)
   f2 = diag(diag(scov))
   tr_s = sum(diag(scov))
@@ -86,7 +121,7 @@ oasb <- function(sample){
 shafer <- function(sample){
   n_ = nrow(sample)
   p = ncol(sample)
-  scov = cov(sample)
+  scov = (t(sample) %*% sample)/nrow(sample)
   f1 = (sum(diag(scov))/p)*diag(p)
   f2 = diag(diag(scov))
   tr_s = sum(diag(scov))
@@ -96,21 +131,23 @@ shafer <- function(sample){
   scorr = cov2cor(scov)
   
   sample_sc = sample %*% (diag(diag(f2)^(-1/2)))
-  v <- (1/(n_*(n_ - 1))) * (crossprod(sample_sc^2) - (1/n_) * (crossprod(sample_sc))^2)
+  v <- (n_/((n_ - 1)^3)) * (crossprod(sample_sc^2) - (1/n_) * (crossprod(sample_sc))^2)
   diag(v) <- 0
   d <- (scorr - diag(diag(scorr)))^2
   rou_ss <- sum(v)/sum(d)
   rou_ss <- max(min(rou_ss, 1), 0)
   scorr_ss = (1-rou_ss)*scorr+rou_ss*diag(p)
   # SS is always based on corr=TRUE
-  
+
   return(list(coef=rou_ss, covest=(f2^(1/2)) %*% scorr_ss %*% (f2^(1/2))))
+  
+  return(list(coef=rou_ss, covest=scov_ss))
 }
 
 od <- function(sample, cov){
   n_ = nrow(sample)
   p = ncol(sample)
-  scov = cov(sample)
+  scov = (t(sample) %*% sample)/nrow(sample)
   f2 = diag(diag(scov))
   
   tr_t = sum(diag(cov))
@@ -129,7 +166,7 @@ od <- function(sample, cov){
 ob <- function(sample, cov){
   n_ = nrow(sample)
   p = ncol(sample)
-  scov = cov(sample)
+  scov = (t(sample) %*% sample)/nrow(sample)
   f1 = (sum(diag(scov))/p)*diag(p)
   f2 = diag(diag(scov))
   

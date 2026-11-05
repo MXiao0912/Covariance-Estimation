@@ -5,22 +5,19 @@ plot_function <- function(scen_r, destination="results/") {
   # ------------------------------------------------------------
   
   shape_vals <- c(
-    OD=NA, OAS=3, LW=14, SS=20, OASD=25, OASB=2,OB=NA
+    OD=NA, OAS=3, LW=14, SS=20, OASD=25
   )
   
   color_vals <- c(
     OD="black",
-    OB="black",
     OAS="blue",
     LW="brown",
     SS="orange",
-    OASD="red",
-    OASB="green"
+    OASD="red"
   )
   
   linetype_vals <- c(
     OD ="dotted",
-    OB ="dotdash",
     "TRUE"="solid",      # ours == TRUE  (OASD, OASB)
     "FALSE"="dashed"     # all other estimators
   )
@@ -29,11 +26,10 @@ plot_function <- function(scen_r, destination="results/") {
     LW=TeX(r'($italic(LW)$)'),
     OAS=TeX(r'($italic(OAS)$)'),
     OASD=TeX(r'($italic(OASD)$)'),
-    SS=TeX(r'($italic(SS)$)'),
-    OASB=TeX(r'($italic(OASB)$)')
+    SS=TeX(r'($italic(SS)$)')
   )
   
-  keep_cols = c("OAS","LW","SS","OASD","OASB")
+  keep_cols = c("OAS","LW","SS","OASD")
   
   base_theme <- theme(
     text = element_text(size=12),
@@ -50,7 +46,7 @@ plot_function <- function(scen_r, destination="results/") {
   # ------------------------------------------------------------
   
   process_data <- function(df) {
-    df[setdiff(c("sd","r","n"), scen_r)] <- NULL
+    df[setdiff(c("sd","r","n","OASB","OB"), scen_r)] <- NULL
     df %>%
       group_by(.data[[scen_r]]) %>%
       summarise(across(everything(), mean)) %>%
@@ -66,8 +62,8 @@ plot_function <- function(scen_r, destination="results/") {
     result_long <- result %>%
       pivot_longer(!all_of(scen_r), names_to="method", values_to=yvar) %>%
       mutate(
-        ours = method %in% c("OASD", "OASB"),
-        linetype_key = ifelse(method %in% c("OD","OB"),
+        ours = method %in% c("OASD"),
+        linetype_key = ifelse(method %in% c("OD"),
                               method,  # Oracle types handled explicitly
                               as.character(ours))
       )
@@ -143,22 +139,19 @@ plot_corr_single_function <- function(scen, destination="results/") {
   # ------------------------------------------------------------
   
   shape_vals <- c(
-    OD=NA, OAS=3, LW=14, SS=20, OASD=25, OASB=2, OB=NA
+    OD=NA, OAS=3, LW=14, SS=20, OASD=25
   )
   
   color_vals <- c(
     OD="black",
-    OB="black",
     OAS="blue",
     LW="brown",
     SS="orange",
-    OASD="red",
-    OASB="green"
+    OASD="red"
   )
   
   linetype_vals <- c(
     OD ="dotted",
-    OB ="dotdash",
     "TRUE"  = "solid",
     "FALSE" = "dashed"
   )
@@ -167,8 +160,7 @@ plot_corr_single_function <- function(scen, destination="results/") {
     LW  = TeX(r'($italic(LW)$)'),
     OAS = TeX(r'($italic(OAS)$)'),
     OASD = TeX(r'($italic(OASD)$)'),
-    SS  = TeX(r'($italic(SS)$)'),
-    OASB = TeX(r'($italic(OASB)$)')
+    SS  = TeX(r'($italic(SS)$)')
   )
   
   keep_cols <- names(tex_labs)  # only these appear in legend
@@ -188,7 +180,7 @@ plot_corr_single_function <- function(scen, destination="results/") {
   # ------------------------------------------------------------
   
   df <- readRDS(paste0(destination, "/", scen, ".rds"))
-  df[setdiff(c("sd","r","n"), scen_r)] <- NULL
+  df[setdiff(c("sd","r","n","OASB","OB"), scen_r)] <- NULL
   
   result <- df %>%
     group_by(.data[[scen_r]]) %>%
@@ -210,8 +202,8 @@ plot_corr_single_function <- function(scen, destination="results/") {
       values_to = "PRIAL"
     ) %>%
     mutate(
-      ours = method %in% c("OASD", "OASB"),
-      linetype_key = ifelse(method %in% c("OD","OB"),
+      ours = method %in% c("OASD"),
+      linetype_key = ifelse(method %in% c("OD"),
                             method,
                             as.character(ours))
     )
@@ -269,22 +261,19 @@ plot_inv_single_function <- function(scen, destination="results/") {
   # ------------------------------------------------------------
   
   shape_vals <- c(
-    OD=NA, OAS=3, LW=14, SS=20, OASD=25, OASB=2, OB=NA
+    OD=NA, OAS=3, LW=14, SS=20, OASD=25
   )
   
   color_vals <- c(
     OD="black",
-    OB="black",
     OAS="blue",
     LW="brown",
     SS="orange",
-    OASD="red",
-    OASB="green"
+    OASD="red"
   )
   
   linetype_vals <- c(
     OD ="dotted",
-    OB ="dotdash",
     "TRUE"  = "solid",   # OASD, OASB
     "FALSE" = "dashed"   # OAS, LW, SS
   )
@@ -293,8 +282,7 @@ plot_inv_single_function <- function(scen, destination="results/") {
     LW  = TeX(r'($italic(LW)$)'),
     OAS = TeX(r'($italic(OAS)$)'),
     OASD= TeX(r'($italic(OASD)$)'),
-    SS  = TeX(r'($italic(SS)$)'),
-    OASB= TeX(r'($italic(OASB)$)')
+    SS  = TeX(r'($italic(SS)$)')
   )
   
   keep_cols <- names(tex_labs)   # OD, OB excluded
@@ -314,7 +302,7 @@ plot_inv_single_function <- function(scen, destination="results/") {
   # ------------------------------------------------------------
   
   df <- readRDS(paste0(destination, "/", scen, ".rds"))
-  df[setdiff(c("sd","r","n"), scen_r)] <- NULL
+  df[setdiff(c("sd","r","n","OASB","OB"), scen_r)] <- NULL
   
   result <- df %>%
     group_by(.data[[scen_r]]) %>%
@@ -336,9 +324,9 @@ plot_inv_single_function <- function(scen, destination="results/") {
       values_to = "MSE"
     ) %>%
     mutate(
-      ours = method %in% c("OASD", "OASB"),
+      ours = method %in% c("OASD"),
       linetype_key = ifelse(
-        method %in% c("OD","OB"),
+        method %in% c("OD"),
         method, 
         as.character(ours)
       )

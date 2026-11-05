@@ -1,7 +1,7 @@
 source("script/packages.R")
 source("script/DGP.R")
 source("script/sim_fct.R")
-source("plot.R")
+source("script/plot.R")
 
 ########### baseline ##########################
 # varying diagonal size
